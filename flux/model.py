@@ -12,6 +12,8 @@ from flux.modules.layers import (
     timestep_embedding,
 )
 
+from flux.lora import add_lora_to_model, LoRALayer
+
 DEVICE = torch.device("cuda")
 
 @dataclass
@@ -83,6 +85,7 @@ class Flux(nn.Module):
         self.pulid_ca = None
         self.pulid_double_interval = 2
         self.pulid_single_interval = 4
+        self.lora_applied = False
 
     def forward(
         self,
@@ -155,3 +158,13 @@ class Flux(nn.Module):
         self.final_layer.to(DEVICE)
         if self.pulid_ca:
             self.pulid_ca.to(DEVICE)
+
+    def apply_lora(self, rank=4, alpha=1):
+        if not self.lora_applied:
+            add_lora_to_model(self, rank=rank, alpha=alpha)
+            self.lora_applied = True
+        else:
+            # Update alpha for existing LoRA layers
+            for module in self.modules():
+                if isinstance(module, LoRALayer):
+                    module.set_alpha(alpha)

@@ -16,6 +16,7 @@ from eva_clip import create_model_and_transforms
 from eva_clip.constants import OPENAI_DATASET_MEAN, OPENAI_DATASET_STD
 from pulid.encoders_flux import IDFormer, PerceiverAttentionCA
 from pulid.utils import img2tensor, tensor2img
+from flux.lora import load_lora_weights, add_lora_to_model
 
 
 class PuLIDPipeline(nn.Module):
@@ -83,6 +84,8 @@ class PuLIDPipeline(nn.Module):
 
         # other configs
         self.debug_img_list = []
+
+        self.dit = dit
 
     def components_to_device(self, device):
         # everything but pulid_ca
@@ -192,3 +195,9 @@ class PuLIDPipeline(nn.Module):
         uncond_id_embedding = self.pulid_encoder(id_uncond, id_vit_hidden_uncond)
 
         return id_embedding, uncond_id_embedding
+
+    def apply_lora(self, lora_path=None, rank=4, alpha=1, multiplier=1.0):
+        if lora_path:
+            self.dit = load_lora_weights(self.dit, lora_path, multiplier)
+        else:
+            self.dit = add_lora_to_model(self.dit, rank=rank, alpha=alpha)

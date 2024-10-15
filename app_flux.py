@@ -1,4 +1,5 @@
 import time
+import os
 
 import gradio as gr
 import torch
@@ -67,6 +68,11 @@ class FluxGenerator:
             true_cfg=1.0,
             timestep_to_start_cfg=1,
             max_sequence_length=128,
+            use_lora=False,
+            lora_paths=None,
+            lora_weights=None,
+            lora_rank=4,
+            lora_alpha=1.0,
     ):
         self.t5.max_length = max_sequence_length
 
@@ -132,6 +138,17 @@ class FluxGenerator:
             else:
                 self.model = self.model.to(self.device)
 
+        if use_lora:
+            if not lora_paths:
+                raise ValueError("LoRA is enabled but no LoRA weights files were uploaded.")
+            
+            for lora_path, weight in zip(lora_paths, lora_weights):
+                file_extension = os.path.splitext(lora_path)[1].lower()
+                if file_extension not in ['.safetensors', '.pt', '.pth', '.bin']:
+                    raise ValueError(f"Unsupported LoRA file format: {file_extension}")
+                
+                self.pulid_model.apply_lora(lora_path=lora_path, multiplier=weight)
+        
         # denoise initial noise
         x = denoise(
             self.model, **inp, timesteps=timesteps, guidance=opts.guidance, id=id_embeddings, id_weight=id_weight,
@@ -221,6 +238,11 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
                     true_cfg = gr.Slider(1.0, 10.0, 1, step=0.1, label="true CFG scale")
                     timestep_to_start_cfg = gr.Slider(0, 20, 1, step=1, label="timestep to start cfg", visible=args.dev)
 
+                with gr.Accordion("LoRA Options", open=False):
+                    use_lora = gr.Checkbox(label="Use LoRA", value=False)
+                    lora_files = gr.File(label="LoRA Weights (.safetensors)", file_count="multiple")
+                    lora_weights = gr.Textbox(label="LoRA Weights (comma-separated)", value="1.0")
+
                 generate_btn = gr.Button("Generate")
 
             with gr.Column():
@@ -291,10 +313,42 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
                 gr.Examples(examples=example_inps, inputs=[prompt, id_image, start_step, guidance, seed, true_cfg],
                             label='true CFG')
 
+        def generate_with_lora(*args):
+            (
+                width, height, num_steps, start_step, guidance, seed,
+                prompt, id_image, id_weight, neg_prompt,
+                true_cfg, timestep_to_start_cfg, max_sequence_length,
+                use_lora, lora_files, lora_weights
+            ) = args
+
+            if use_lora:
+                if not lora_files:
+                    raise ValueError("LoRA is enabled but no LoRA weights files were uploaded.")
+                lora_paths = [file.name for file in lora_files]
+                weights = [float(w.strip()) for w in lora_weights.split(',')]
+                if len(weights) != len(lora_paths):
+                    weights = [1.0] * len(lora_paths)
+                
+                return generator.generate_image(
+                    width, height, num_steps, start_step, guidance, seed,
+                    prompt, id_image, id_weight, neg_prompt,
+                    true_cfg, timestep_to_start_cfg, max_sequence_length,
+                    use_lora=use_lora,
+                    lora_paths=lora_paths,
+                    lora_weights=weights,
+                )
+            else:
+                return generator.generate_image(
+                    width, height, num_steps, start_step, guidance, seed,
+                    prompt, id_image, id_weight, neg_prompt,
+                    true_cfg, timestep_to_start_cfg, max_sequence_length,
+                    use_lora=False,
+                )
+
         generate_btn.click(
-            fn=generator.generate_image,
+            fn=generate_with_lora,
             inputs=[width, height, num_steps, start_step, guidance, seed, prompt, id_image, id_weight, neg_prompt,
-                    true_cfg, timestep_to_start_cfg, max_sequence_length],
+                    true_cfg, timestep_to_start_cfg, max_sequence_length, use_lora, lora_files, lora_weights],
             outputs=[output_image, seed_output, intermediate_output],
         )
 
